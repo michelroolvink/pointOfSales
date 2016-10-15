@@ -1,12 +1,16 @@
 package pos
 
+import pos.PointOfSales._
+
 import scala.util.{Failure, Try}
 
 object PointOfSales {
 
   type Product = String // just the name of the product
 
-  type Price = (Int, Double) // (quantity, price), the price for a given quantity, to allow discounts for larger quantities
+  case class Price(quantity: Int, price: BigDecimal) extends Ordered[Price] {
+    override def compare(that: Price): Int = (this.price - that.price).toInt
+  } // (quantity, price), the price for a given quantity, to allow discounts for larger quantities
 
   type PriceList = List[Price]
 
@@ -21,39 +25,31 @@ object PointOfSales {
     }
   }
 
-  private def calculateArticlePrice(quantity: Int, priceList: PriceList): Try[Double] = {
-    def accCalc(quantity: Int, priceList: PriceList, acc: Double): Double = priceList match {
+  private def calculateArticlePrice(quantity: Int, priceList: PriceList): BigDecimal = {
+    def accCalc(quantity: Int, priceList: PriceList, acc: BigDecimal): BigDecimal = priceList match {
       case Nil => acc
-      case (qty, prc) :: rest => accCalc(quantity % qty, rest, acc + prc * (quantity / qty))
+      case Price(qty, prc) :: rest => accCalc(quantity % qty, rest, acc + prc * (quantity / qty))
     }
-    if (priceList.sorted.head._1 < 1)
-      Failure(new IllegalArgumentException(s"Quantities in a Price must be >= 1 - found: ${priceList.sorted.head._1}"))
-    else if (priceList.sorted.head._1 > 1)
-      Failure(new IllegalArgumentException(s"Pricelist requires a unit price - found: ${priceList.sorted.head._1}"))
-    else
-      Try(accCalc(quantity, priceList.sorted.reverse, 0.0))
+    accCalc(quantity, priceList.sorted.reverse, BigDecimal(0.0))
   }
 
-  private def calculateBasketPrice(basket: Basket, catalogue: Catalogue): Try[Double] = {
+  private def calculateBasketPrice(basket: Basket, catalogue: Catalogue): BigDecimal = {
     val articlePrices = for {
       (product, quantity) <- basket
       articlePrice = calculateArticlePrice(quantity, catalogue(product))
-    } yield articlePrice.get
-    Try(articlePrices.sum)
+    } yield articlePrice
+    articlePrices.sum
   }
 }
 
-class PointOfSales() {
-
-  import pos.PointOfSales._
-
-  private var catalogue: Catalogue = Map.empty
-
-  def setPricing(catalogue: Catalogue): Unit = this.catalogue = catalogue
+class PointOfSales(catalogue: Catalogue) {
+  require(catalogue.forall {
+    case (product, priceList) => priceList.sorted.head.quantity == 1
+  }, "Not each product has a valid priceList")
 
   private var basket: Basket = Map.empty
 
   def scan(product: Product): Unit = basket = addProduct2Basket(product, basket)
 
-  def calculateTotal(): Try[Double] = calculateBasketPrice(basket, catalogue)
+  def calculateTotal(): BigDecimal = calculateBasketPrice(basket, catalogue)
 }
